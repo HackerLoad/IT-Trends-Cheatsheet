@@ -96,46 +96,28 @@ Erstelle jedes Subnetz einzeln mit dem jeweiligen Namen und CIDR-Block.
    - Key pair: dasselbe wie beim Bastion Host
 3. **"Network settings"** → **"Edit"**:
    - VPC: `klausurwi24`
-   - Subnet: `sub2_priv`
-   - Auto-assign public IP: **Disable**
+   - Subnet: `sub1_pub` ← **vorerst öffentlich, damit httpd installiert werden kann!**
+   - Auto-assign public IP: **Enable** ← **vorerst aktivieren**
 4. **Security Group** erstellen:
    - Name: `sg-private`
    - Inbound Rules:
-     - SSH (Port 22) – Source: `192.168.70.0/25`
-     - HTTP (Port 80) – Source: `192.168.70.0/25`
+     - SSH (Port 22) – Source: `0.0.0.0/0` ← **vorerst offen für Installation**
+     - HTTP (Port 80) – Source: `0.0.0.0/0` ← **vorerst offen für Installation**
 5. **"Launch Instance"** klicken
-
-> Keine Regel für `0.0.0.0/0` – die Instanz ist ausschließlich aus dem VPC erreichbar.
 
 ---
 
 ## 6. HTTP-Daemon einrichten
 
-### Schritt 1: Key auf den Bastion Host kopieren
+> **Quick & Dirty:** Die Instanz läuft zunächst im öffentlichen Subnetz, damit `yum` das Internet erreichen kann. Nach der Installation wird sie ins private Subnetz verschoben.
+
+### Schritt 1: Mit der (noch öffentlichen) privaten Instanz verbinden
 
 ```bash
-scp -i dein-keypair.pem dein-keypair.pem ec2-user@<public-ip>:/home/ec2-user/
+ssh -i dein-keypair.pem ec2-user@<public-ip-der-privaten-instanz>
 ```
 
-### Schritt 2: Mit dem Bastion Host verbinden
-
-```bash
-ssh -i dein-keypair.pem ec2-user@<public-ip>
-```
-
-### Schritt 3: Berechtigungen setzen
-
-```bash
-chmod 400 dein-keypair.pem
-```
-
-### Schritt 4: Von dort zur privaten Instanz verbinden
-
-```bash
-ssh -i dein-keypair.pem ec2-user@<private-ip>
-```
-
-### Schritt 5: Apache installieren und konfigurieren
+### Schritt 2: Apache installieren und konfigurieren
 
 ```bash
 # Apache installieren
@@ -148,6 +130,29 @@ echo "Hallo, ich bin eine private Instanz" | sudo tee /var/www/html/index.html
 sudo systemctl start httpd
 sudo systemctl enable httpd
 ```
+
+### Schritt 3: Instanz ins private Subnetz verschieben
+
+Da AWS das nachträgliche Ändern des Subnetzes einer laufenden Instanz nicht direkt erlaubt, gibt es zwei Möglichkeiten:
+
+**Option A – Instanz stoppen und Subnetz über AMI-Rebuild wechseln:**
+1. Instanz stoppen
+2. Rechtsklick → **"Create Image"** (AMI erstellen)
+3. Neue Instanz aus diesem AMI starten, diesmal mit:
+   - Subnet: `sub2_priv`
+   - Auto-assign public IP: **Disable**
+
+**Option B – Sicherheitsgruppe einschränken (schneller für die Klausur):**
+
+Die Instanz bleibt physisch in `sub1_pub`, wird aber durch die Sicherheitsgruppe so abgeschottet, dass sie nur noch aus dem VPC erreichbar ist:
+
+1. EC2 → Instanz auswählen → **"Security"** → Sicherheitsgruppe `sg-private` öffnen
+2. Inbound Rules anpassen:
+   - SSH (Port 22) – Source: `192.168.70.0/25` ← nur noch aus dem VPC
+   - HTTP (Port 80) – Source: `192.168.70.0/25` ← nur noch aus dem VPC
+3. Auto-assign Public IP spielt dann keine Rolle mehr – von außen kommt niemand durch
+
+> Für die Klausur reicht Option B vollständig aus. Der Screenshot der Sicherheitsgruppe zeigt dann die eingeschränkten Regeln, und der Browser-Timeout sowie der funktionierende `curl` vom Bastion Host beweisen das gewünschte Verhalten.
 
 ---
 
@@ -165,7 +170,7 @@ Erwartetes Ergebnis: **Timeout** – kein Zugriff von außen möglich.
 
 ### Von innen (muss funktionieren)
 
-Führe auf dem Bastion Host folgenden Befehl aus:
+Verbinde dich zunächst mit dem Bastion Host und führe dort aus:
 
 ```bash
 curl http://<private-ip>
